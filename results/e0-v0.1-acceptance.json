@@ -6,30 +6,47 @@
     "safe_to_trade": false
   },
   "contract": {
-    "freeze_commit": "cc31cedf5a648f04bef6ed9d4f688565f00ee144",
+    "freeze_commit": "f5849e943b76ce0c6a3fe5ae4a2007709ec947fa",
     "path": "PRODUCT_CONTRACT.md",
-    "sha256": "3aa0b1b708dfc08e14120afd607e0871bb042787cf8d69c3a343b6aab6b15585"
+    "sha256": "3318284aaa652aa051e3143bcbf1b86ce74b08d7e9fa10adae6314928d580ce6"
   },
-  "core_output_sha256": {
-    "checksums.sha256": "b6d288fe7238228e3bd1c9df8a9f4efc148af28aa9d6d3fd88e7c293e3568cf9",
-    "manifest.json": "ce61c440f216fd70ae6bb81fc30d8bd5885226cecc4ae4cfe1074f0bcce2a6d5",
-    "report.md": "08420b997ad250415bce871a1d6b6f649324469221da7e68e80c24a122ae44cd",
-    "verdict.json": "f8ddb38f036469e05e8a45af1cbbb64ea52196355b7880ca43d48bd206453a87"
-  },
+  "implementation_commit": "f5849e943b76ce0c6a3fe5ae4a2007709ec947fa",
   "inputs": {
     "base_zip_sha256": "9bd2b4a31030a4840609593f84c5f20de865e649393653ac2f961b756e10152c",
     "lookahead_csv_sha256": "8a1180e4e6358b9ec5fcd7e7ec3c3a8f692ee6525c3a6a1a2a1dd05978b462b6",
     "stress_zip_sha256": "2dbab9d94e247163a739b5f82eaace2f1bcef43699dbf5cfea7e461f875f6fb4"
   },
-  "implementation_commit": "cb5c26f0a68775eef47c1c403cb4a8b572701c39",
-  "product": "GMAQ_EVIDENCE_PACK_V0_1",
+  "outputs": {
+    "private": {
+      "file_count": 8,
+      "sharing": "PRIVATE_DO_NOT_UPLOAD",
+      "sha256": {
+        "checksums.sha256": "672245aac9a7b2149e65251621341d3c793d79029d07af62012a960fb41cee51",
+        "manifest.json": "1a69ff9c7554f4e6cf379a72617adef5a204a0b8248f3fa9a732327c96691fd6",
+        "public-summary.json": "c395d970d2b6e28b394f878b6efdac1b998e1048d71068833cc27414ea96273c",
+        "report.md": "7bcf1e870eba4d783a80f6a9400e1147d906d56f6383413ccd2c9f91e3deccc9",
+        "verdict.json": "f8ddb38f036469e05e8a45af1cbbb64ea52196355b7880ca43d48bd206453a87"
+      }
+    },
+    "public": {
+      "file_count": 1,
+      "sha256": {
+        "public-summary.json": "c395d970d2b6e28b394f878b6efdac1b998e1048d71068833cc27414ea96273c"
+      }
+    }
+  },
+  "product": "GMAQ_EVIDENCE_PACK_V0_1_0",
   "real_freqtrade_artifacts": true,
-  "status": "ACCEPTANCE_PASS",
+  "scope": "ONE_INTERNAL_SAMPLE_NOT_ALPHA_PROFITABILITY_LIVE_READINESS_OR_ADOPTION",
+  "status": "TECHNICAL_ACCEPTANCE_PASS",
   "strategy": "E0V1E_53_Sharpe",
   "tests": {
-    "passed": 9,
+    "passed": 13,
     "python": "3.12"
   },
-  "twice_byte_identical": true,
+  "twice_byte_identical": {
+    "private": true,
+    "public": true
+  },
   "verdict": "PASS_FOR_REVIEW"
 }
