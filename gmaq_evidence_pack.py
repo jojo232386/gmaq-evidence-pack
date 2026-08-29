@@ -115,6 +115,8 @@ def secret_in_config(value: object, key: str = "") -> bool:
 
 
 def number(value: object, field: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"missing or invalid numeric field: {field}")
     try:
         result = float(value)
     except (TypeError, ValueError) as exc:
@@ -122,6 +124,12 @@ def number(value: object, field: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"missing or invalid numeric field: {field}")
     return result
+
+
+def integer(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"missing or invalid integer field: {field}")
+    return value
 
 
 def string(value: object, field: str) -> str:
@@ -186,7 +194,7 @@ def parse_artifact(path: Path) -> dict:
         "trading_mode": string(summary.get("trading_mode"), "summary.trading_mode"),
         "margin_mode": summary.get("margin_mode"),
         "stake_currency": string(summary.get("stake_currency"), "summary.stake_currency"),
-        "max_open_trades": number(summary.get("max_open_trades"), "summary.max_open_trades"),
+        "max_open_trades": integer(summary.get("max_open_trades"), "summary.max_open_trades"),
     }
     for field in ("trading_mode", "margin_mode", "stake_currency", "max_open_trades"):
         # Native exports may omit values inherited from the command line; the
@@ -206,15 +214,25 @@ def parse_artifact(path: Path) -> dict:
         profit = number(row.get("profit_total_abs"), "results_per_pair.profit_total_abs")
         if profit > 0:
             positive_pair_profit.append(profit)
+    total_trades = integer(summary.get("total_trades"), "total_trades")
+    require_nonnegative = {
+        "total_trades": total_trades,
+        "profit_factor": number(summary.get("profit_factor"), "profit_factor"),
+        "max_drawdown_account": number(summary.get("max_drawdown_account"), "max_drawdown_account"),
+    }
+    if require_nonnegative["total_trades"] < 0 or require_nonnegative["profit_factor"] < 0:
+        raise ValueError("trade count and profit factor must be nonnegative")
+    if not 0 <= require_nonnegative["max_drawdown_account"] <= 1:
+        raise ValueError("max_drawdown_account must be between 0 and 1")
     return {
         "source": {"sha256": sha256_file(path), "size_bytes": path.stat().st_size},
         "identity": identity,
         "pairlist_methods": methods,
         "metrics": {
-            "total_trades": number(summary.get("total_trades"), "total_trades"),
+            "total_trades": total_trades,
             "total_return": number(summary.get("profit_total"), "profit_total"),
-            "profit_factor": number(summary.get("profit_factor"), "profit_factor"),
-            "max_drawdown_account": number(summary.get("max_drawdown_account"), "max_drawdown_account"),
+            "profit_factor": require_nonnegative["profit_factor"],
+            "max_drawdown_account": require_nonnegative["max_drawdown_account"],
             "positive_pair_profit": positive_pair_profit,
         },
     }
@@ -244,17 +262,20 @@ def parse_lookahead(path: Path) -> dict:
     has_bias = False
     for row in rows:
         try:
-            checked += int(row["total_signals"])
-            entry += int(row["biased_entry_signals"])
-            exit_signals += int(row["biased_exit_signals"])
+            row_checked = int(row["total_signals"])
+            row_entry = int(row["biased_entry_signals"])
+            row_exit = int(row["biased_exit_signals"])
         except (TypeError, ValueError) as exc:
             raise ValueError("malformed lookahead CSV") from exc
+        if row_checked < 0 or row_entry < 0 or row_exit < 0:
+            raise ValueError("malformed lookahead CSV")
+        checked += row_checked
+        entry += row_entry
+        exit_signals += row_exit
         value = str(row["has_bias"]).strip().lower()
         if value not in {"true", "false"}:
             raise ValueError("malformed lookahead CSV")
         has_bias = has_bias or value == "true"
-    if checked < 0 or entry < 0 or exit_signals < 0:
-        raise ValueError("malformed lookahead CSV")
     return {
         "sha256": sha256_file(path),
         "size_bytes": path.stat().st_size,

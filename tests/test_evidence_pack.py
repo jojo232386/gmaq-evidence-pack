@@ -14,7 +14,7 @@ assert SPEC.loader
 SPEC.loader.exec_module(evidence_pack)
 
 
-def export(path, *, dynamic=False, return_value=0.12, source=b"class Example: pass\n", key="REDACTED"):
+def export(path, *, dynamic=False, return_value=0.12, source=b"class Example: pass\n", key="REDACTED", total_trades=120, drawdown=0.2):
     strategy = "ExampleStrategy"
     pairs = ["BTC/USDT:USDT", "ETH/USDT:USDT"]
     summary = {
@@ -26,10 +26,10 @@ def export(path, *, dynamic=False, return_value=0.12, source=b"class Example: pa
         "margin_mode": "isolated",
         "stake_currency": "USDT",
         "max_open_trades": 2,
-        "total_trades": 120,
+        "total_trades": total_trades,
         "profit_total": return_value,
         "profit_factor": 1.2,
-        "max_drawdown_account": 0.2,
+        "max_drawdown_account": drawdown,
         "results_per_pair": [
             {"key": pairs[0], "profit_total_abs": 60},
             {"key": pairs[1], "profit_total_abs": 40},
@@ -147,6 +147,26 @@ class EvidencePackTests(unittest.TestCase):
         output = self.root / "duplicate-output"
         self.assertEqual(evidence_pack.build_pack(duplicate, output), evidence_pack.BLOCKED)
         self.assertEqual(self.verdict(output), evidence_pack.BLOCKED)
+
+    def test_negative_lookahead_rows_cannot_cancel(self):
+        with self.lookahead.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["strategy", "has_bias", "total_signals", "biased_entry_signals", "biased_exit_signals"])
+            writer.writeheader()
+            writer.writerow({"strategy": "ExampleStrategy", "has_bias": "False", "total_signals": -1, "biased_entry_signals": -1, "biased_exit_signals": 0})
+            writer.writerow({"strategy": "ExampleStrategy", "has_bias": "False", "total_signals": 21, "biased_entry_signals": 1, "biased_exit_signals": 0})
+        output = self.root / "negative-lookahead"
+        self.assertEqual(
+            evidence_pack.build_pack(self.base, output, self.stress, self.lookahead, 0.001, 0.002),
+            evidence_pack.BLOCKED,
+        )
+
+    def test_fractional_trade_count_and_negative_drawdown_are_blocked(self):
+        fractional = self.root / "fractional.zip"
+        export(fractional, total_trades=100.5)
+        self.assertEqual(evidence_pack.build_pack(fractional, self.root / "fractional-output"), evidence_pack.BLOCKED)
+        negative_drawdown = self.root / "negative-drawdown.zip"
+        export(negative_drawdown, drawdown=-0.1)
+        self.assertEqual(evidence_pack.build_pack(negative_drawdown, self.root / "negative-drawdown-output"), evidence_pack.BLOCKED)
 
 
 if __name__ == "__main__":
