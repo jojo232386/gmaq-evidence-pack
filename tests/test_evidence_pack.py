@@ -1,5 +1,7 @@
+import contextlib
 import csv
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
@@ -14,7 +16,18 @@ assert SPEC.loader
 SPEC.loader.exec_module(evidence_pack)
 
 
-def export(path, *, dynamic=False, return_value=0.12, source=b"class Example: pass\n", key="REDACTED", total_trades=120, drawdown=0.2):
+def export(
+    path,
+    *,
+    dynamic=False,
+    return_value=0.12,
+    source=b"class Example: pass\n",
+    key="REDACTED",
+    total_trades=120,
+    drawdown=0.2,
+    config_extra=None,
+    extra_members=None,
+):
     strategy = "ExampleStrategy"
     pairs = ["BTC/USDT:USDT", "ETH/USDT:USDT"]
     summary = {
@@ -46,17 +59,34 @@ def export(path, *, dynamic=False, return_value=0.12, source=b"class Example: pa
         "max_open_trades": 2,
         "exchange": {"pair_whitelist": pairs, "key": key, "secret": "REDACTED"},
     }
+    if config_extra:
+        config.update(config_extra)
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("result.json", json.dumps({"strategy": {strategy: summary}}, sort_keys=True))
         zf.writestr("result_config.json", json.dumps(config, sort_keys=True))
         zf.writestr("ExampleStrategy.py", source)
+        for name, data in (extra_members or {}).items():
+            zf.writestr(name, data)
 
 
-def lookahead(path, *, biased=False):
+def lookahead(path, *, biased=False, extra_fields=None):
+    extra_fields = extra_fields or {}
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["strategy", "has_bias", "total_signals", "biased_entry_signals", "biased_exit_signals"])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["strategy", "has_bias", "total_signals", "biased_entry_signals", "biased_exit_signals", *extra_fields],
+        )
         writer.writeheader()
-        writer.writerow({"strategy": "ExampleStrategy", "has_bias": str(biased), "total_signals": 20, "biased_entry_signals": int(biased), "biased_exit_signals": 0})
+        writer.writerow(
+            {
+                "strategy": "ExampleStrategy",
+                "has_bias": str(biased),
+                "total_signals": 20,
+                "biased_entry_signals": int(biased),
+                "biased_exit_signals": 0,
+                **extra_fields,
+            }
+        )
 
 
 class EvidencePackTests(unittest.TestCase):
@@ -74,29 +104,87 @@ class EvidencePackTests(unittest.TestCase):
         self.temp.cleanup()
 
     def verdict(self, directory):
-        return json.loads((directory / "verdict.json").read_text())["verdict"]
+        return json.loads((directory / "public-summary.json").read_text())["verdict"]
+
+    def public_summary(self, directory):
+        return json.loads((directory / "public-summary.json").read_text())
+
+    def assert_public_schema(self, summary, verdict, *, stress, lookahead):
+        self.assertEqual(
+            set(summary),
+            {"checks", "claims", "evidence", "format", "verdict"},
+        )
+        self.assertEqual(summary["format"], evidence_pack.PUBLIC_FORMAT)
+        self.assertEqual(summary["verdict"], verdict)
+        self.assertEqual(summary["evidence"], {"base": True, "lookahead": lookahead, "stress": stress})
+        self.assertEqual(
+            summary["claims"],
+            {"alpha": False, "live_ready": False, "profitability": False, "safe_to_trade": False},
+        )
+        self.assertTrue(summary["checks"])
+        self.assertTrue(all(set(item) == {"name", "status"} for item in summary["checks"]))
 
     def test_complete_pack_is_pass_and_deterministic(self):
         first = self.root / "first"
         second = self.root / "second"
         self.assertEqual(evidence_pack.build_pack(self.base, first, self.stress, self.lookahead, 0.001, 0.002), evidence_pack.PASS_FOR_REVIEW)
         self.assertEqual(evidence_pack.build_pack(self.base, second, self.stress, self.lookahead, 0.001, 0.002), evidence_pack.PASS_FOR_REVIEW)
-        for name in ("manifest.json", "verdict.json", "report.md", "checksums.sha256"):
+        self.assertEqual([path.name for path in first.iterdir()], ["public-summary.json"])
+        self.assertEqual((first / "public-summary.json").read_bytes(), (second / "public-summary.json").read_bytes())
+        self.assert_public_schema(
+            self.public_summary(first),
+            evidence_pack.PASS_FOR_REVIEW,
+            stress=True,
+            lookahead=True,
+        )
+        serialized = (first / "public-summary.json").read_text()
+        for private_value in ("ExampleStrategy", "BTC/USDT", "0.001", "sha256", "timerange", "detail"):
+            self.assertNotIn(private_value, serialized)
+
+    def test_private_artifacts_are_explicit_and_deterministic(self):
+        first = self.root / "private-first"
+        second = self.root / "private-second"
+        for output in (first, second):
+            self.assertEqual(
+                evidence_pack.build_pack(
+                    self.base,
+                    output,
+                    self.stress,
+                    self.lookahead,
+                    0.001,
+                    0.002,
+                    include_private_artifacts=True,
+                ),
+                evidence_pack.PASS_FOR_REVIEW,
+            )
+        for name in ("public-summary.json", "manifest.json", "verdict.json", "report.md", "checksums.sha256"):
             self.assertEqual((first / name).read_bytes(), (second / name).read_bytes())
+        self.assertEqual((first / "inputs" / "base.zip").read_bytes(), self.base.read_bytes())
         manifest = json.loads((first / "manifest.json").read_text())
         self.assertEqual(manifest["base"]["identity"]["strategy"], "ExampleStrategy")
-        self.assertEqual(manifest["lookahead"]["strategy"], "ExampleStrategy")
-        self.assertFalse(manifest["claims"]["profitability"])
+        self.assertEqual(manifest["privacy"], "PRIVATE_DO_NOT_UPLOAD")
 
     def test_missing_optional_evidence_requires_review(self):
         output = self.root / "review"
         self.assertEqual(evidence_pack.build_pack(self.base, output), evidence_pack.REVIEW_REQUIRED)
         self.assertEqual(self.verdict(output), evidence_pack.REVIEW_REQUIRED)
+        self.assert_public_schema(
+            self.public_summary(output),
+            evidence_pack.REVIEW_REQUIRED,
+            stress=False,
+            lookahead=False,
+        )
 
     def test_bias_and_dynamic_pairlist_are_blocked(self):
         lookahead(self.lookahead, biased=True)
         output = self.root / "bias"
         self.assertEqual(evidence_pack.build_pack(self.base, output, self.stress, self.lookahead, 0.001, 0.002), evidence_pack.BLOCKED)
+        self.assert_public_schema(
+            self.public_summary(output),
+            evidence_pack.BLOCKED,
+            stress=True,
+            lookahead=True,
+        )
         dynamic = self.root / "dynamic.zip"
         export(dynamic, dynamic=True)
         output = self.root / "dynamic"
@@ -134,6 +222,70 @@ class EvidencePackTests(unittest.TestCase):
         output = self.root / "secret-output"
         with self.assertRaises(evidence_pack.SecretError):
             evidence_pack.build_pack(secret, output)
+        self.assertFalse(output.exists())
+
+    def test_nested_mixed_case_secrets_are_blocked_but_placeholders_are_allowed(self):
+        for field, value in (("apiKey", "canary-api-value"), ("Pass_Word", "canary-pass-value"), ("wsToken", "canary-token-value")):
+            secret = self.root / f"{field}.zip"
+            export(secret, config_extra={"service": {field: value}})
+            output = self.root / f"{field}-output"
+            with self.assertRaises(evidence_pack.SecretError):
+                evidence_pack.build_pack(secret, output)
+            self.assertFalse(output.exists())
+
+        safe = self.root / "safe-placeholders.zip"
+        export(
+            safe,
+            source=b"class Example:\n    def token_bucket(self):\n        return 'ordinary strategy code'\n",
+            config_extra={
+                "service": {
+                    "apiKey": "${EXCHANGE_API_KEY}",
+                    "password": "<REDACTED>",
+                    "token": "***",
+                }
+            },
+            extra_members={
+                "notes.txt": "Authorization: Bearer ${TOKEN}\nproxy = \"https://${PROXY_USER}:${PROXY_PASSWORD}@example.test\"\n"
+            },
+        )
+        output = self.root / "safe-placeholders-output"
+        self.assertEqual(evidence_pack.build_pack(safe, output), evidence_pack.REVIEW_REQUIRED)
+
+    def test_literal_secrets_anywhere_are_blocked_without_output(self):
+        cases = []
+
+        source = self.root / "source-secret.zip"
+        export(source, source=b'class Example:\n    api_token = "canary-source-token"\n')
+        cases.append((source, self.lookahead, "source"))
+
+        unused = self.root / "unused-secret.zip"
+        export(unused, extra_members={"notes.txt": "Authorization: Bearer canary-unused-token\n"})
+        cases.append((unused, self.lookahead, "unused"))
+
+        url = self.root / "url-secret.zip"
+        export(url, extra_members={"notes.txt": 'proxy = "https://canary-user:canary-pass@example.test"\n'})
+        cases.append((url, self.lookahead, "url"))
+
+        csv_secret = self.root / "lookahead-secret.csv"
+        lookahead(csv_secret, extra_fields={"apiToken": "canary-csv-token"})
+        cases.append((self.base, csv_secret, "csv"))
+
+        for artifact, lookahead_path, label in cases:
+            output = self.root / f"{label}-output"
+            with self.assertRaises(evidence_pack.SecretError):
+                evidence_pack.build_pack(artifact, output, None, lookahead_path)
+            self.assertFalse(output.exists())
+
+    def test_cli_error_does_not_echo_secret(self):
+        secret_value = "canary-must-not-echo"
+        secret = self.root / "cli-secret.zip"
+        export(secret, config_extra={"telegram": {"token": secret_value}})
+        output = self.root / "cli-secret-output"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = evidence_pack.main(["--base", str(secret), "--output", str(output)])
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn(secret_value, stderr.getvalue())
         self.assertFalse(output.exists())
 
     def test_duplicate_json_keys_are_blocked(self):

@@ -1,0 +1,95 @@
+name: Evidence audit request
+description: Ask for help interpreting a locally generated GMAQ Evidence Pack without uploading private trading artifacts.
+title: "[Audit] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Run GMAQ Evidence Pack locally and share only its generated `public-summary.json` plus the fields requested below.
+
+        **Do not use the private-artifacts option for a public issue. Do not upload a Freqtrade ZIP, strategy source, config, database, API key, secret, account balance, order history, or wallet information.** Maintainers will never ask for credentials or funds.
+
+  - type: input
+    id: evidence_pack_version
+    attributes:
+      label: Evidence Pack version
+      description: Use the release tag or commit, for example v0.1.0.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: freqtrade_version
+    attributes:
+      label: Freqtrade version
+      placeholder: 2026.x
+    validations:
+      required: true
+
+  - type: dropdown
+    id: strategy_visibility
+    attributes:
+      label: Strategy visibility
+      options:
+        - Private or proprietary
+        - Public open-source strategy
+        - Synthetic test strategy
+    validations:
+      required: true
+
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Local verdict
+      options:
+        - BLOCKED
+        - REVIEW_REQUIRED
+        - PASS_FOR_REVIEW
+        - The tool did not create a verdict
+    validations:
+      required: true
+
+  - type: textarea
+    id: public_summary
+    attributes:
+      label: Public summary
+      description: Paste the complete generated public-summary.json. It must not contain hashes, strategy names, pairs, metrics, paths, fees, or check details.
+      placeholder: |
+        {
+          "checks": [{"name": "input_parsing", "status": "FAIL"}],
+          "claims": {"alpha": false, "live_ready": false, "profitability": false, "safe_to_trade": false},
+          "evidence": {"base": true, "lookahead": false, "stress": false},
+          "format": "gmaq-evidence-public-summary-v0.1",
+          "verdict": "BLOCKED"
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What should we help you understand?
+      description: Describe the reproducibility or evidence problem, not the private strategy logic.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: citation_consent
+    attributes:
+      label: May this sanitized case be counted in the public validation ledger?
+      options:
+        - Ask me before counting or quoting it
+        - Yes, count the issue and quote sanitized findings
+        - No, do not count or quote it
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety_confirmation
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I am sharing only public-summary.json and the form fields, with no credentials, funds, account data, orders, private code, raw ZIPs, databases, hashes, or private-artifact output.
+          required: true
+        - label: I understand PASS_FOR_REVIEW does not establish Alpha, profitability, live readiness, or safety to trade.
+          required: true

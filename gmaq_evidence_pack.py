@@ -6,9 +6,10 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 import math
-import shutil
+import re
 import stat
 import sys
 import zipfile
@@ -16,23 +17,96 @@ from pathlib import Path, PurePosixPath
 
 
 MAX_MEMBERS = 32
+MAX_INPUT_SIZE = 128 * 1024 * 1024
 MAX_TOTAL_SIZE = 128 * 1024 * 1024
 MAX_MEMBER_SIZE = 64 * 1024 * 1024
 PASS_FOR_REVIEW = "PASS_FOR_REVIEW"
 REVIEW_REQUIRED = "REVIEW_REQUIRED"
 BLOCKED = "BLOCKED"
+PUBLIC_FORMAT = "gmaq-evidence-public-summary-v0.1"
+
+SENSITIVE_CONFIG_KEYS = {
+    "accesskey",
+    "accesstoken",
+    "accountid",
+    "apikey",
+    "apikeys",
+    "apisecret",
+    "authorization",
+    "chatid",
+    "clientkey",
+    "clientsecret",
+    "cookie",
+    "jwt",
+    "jwtsecret",
+    "jwtsecretkey",
+    "key",
+    "passphrase",
+    "password",
+    "privatekey",
+    "refreshtoken",
+    "secret",
+    "sessioncookie",
+    "signingkey",
+    "token",
+    "uid",
+    "userid",
+    "walletaddress",
+    "webhook",
+    "webhookauthorization",
+    "webhookurl",
+    "wstoken",
+}
+SENSITIVE_CONFIG_SUFFIXES = (
+    "apikey",
+    "apisecret",
+    "authorization",
+    "chatid",
+    "clientsecret",
+    "cookie",
+    "passphrase",
+    "password",
+    "privatekey",
+    "secret",
+    "token",
+)
+TEXT_MEMBER_SUFFIXES = {".cfg", ".conf", ".csv", ".ini", ".json", ".md", ".py", ".txt", ".yaml", ".yml"}
+KNOWN_BINARY_SUFFIXES = {".feather"}
+KEY_VALUE_LITERAL = re.compile(
+    r"(?i)(?P<key>[\"']?[A-Za-z][A-Za-z0-9_-]{0,63}[\"']?)\s*[:=]\s*(?P<quote>[\"'])(?P<value>[^\"'\r\n]*)(?P=quote)"
+)
+HEADER_LITERAL = re.compile(r"(?im)^\s*(authorization|proxy-authorization|cookie|set-cookie)\s*:\s*(?P<value>\S.*)$")
+CREDENTIAL_URL = re.compile(r"(?i)https?://[^\s/:@]+:[^\s/@]+@")
+KNOWN_SECRET_MARKERS = (
+    re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(rb"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(rb"\bAIza[0-9A-Za-z_-]{20,}\b"),
+    re.compile(rb"\bgh[pousr]_[0-9A-Za-z]{20,}\b"),
+    re.compile(rb"\bsk-[0-9A-Za-z_-]{16,}\b"),
+    re.compile(rb"\bxox[baprs]-[0-9A-Za-z-]{10,}\b"),
+)
 
 
 class SecretError(ValueError):
     """An input contains a secret which must never be copied into a pack."""
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_snapshot(path: Path) -> bytes:
+    try:
+        if not path.is_file():
+            raise ValueError(f"input is not a file: {path}")
+        if path.stat().st_size > MAX_INPUT_SIZE:
+            raise ValueError(f"input exceeds {MAX_INPUT_SIZE} bytes")
+        data = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot read input: {path}") from exc
+    if len(data) > MAX_INPUT_SIZE:
+        raise ValueError(f"input exceeds {MAX_INPUT_SIZE} bytes")
+    return data
 
 
 def json_bytes(value: object) -> bytes:
@@ -43,10 +117,10 @@ def write_json(path: Path, value: object) -> None:
     path.write_bytes(json_bytes(value))
 
 
-def safe_members(path: Path) -> dict[str, bytes]:
+def safe_members(data: bytes) -> dict[str, bytes]:
     """Read a small Freqtrade ZIP without ever extracting it."""
     try:
-        with zipfile.ZipFile(path) as archive:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
             infos = archive.infolist()
             names = [item.filename for item in infos]
             if len(infos) > MAX_MEMBERS:
@@ -102,16 +176,97 @@ def read_json(data: bytes, label: str) -> dict:
     return value
 
 
-def secret_in_config(value: object, key: str = "") -> bool:
+def normalize_key(value: str) -> str:
+    return "".join(character for character in value.lower() if character.isalnum())
+
+
+def sensitive_key(value: str) -> bool:
+    key = normalize_key(value.strip("\"'"))
+    return key in SENSITIVE_CONFIG_KEYS or key.endswith(SENSITIVE_CONFIG_SUFFIXES)
+
+
+def safe_placeholder(value: object) -> bool:
+    if value is None or value == "":
+        return True
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if stripped.upper() in {"REDACTED", "***", "<REDACTED>"}:
+        return True
+    placeholder = r"(?:REDACTED|\*\*\*|<REDACTED>|\$\{[A-Za-z_][A-Za-z0-9_]*\})"
+    return bool(re.fullmatch(placeholder, stripped, re.IGNORECASE)) or bool(
+        re.fullmatch(rf"(?:Bearer|Basic)\s+{placeholder}", stripped, re.IGNORECASE)
+    )
+
+
+def sensitive_value_present(value: object) -> bool:
     if isinstance(value, dict):
-        return any(secret_in_config(item, str(name).lower()) for name, item in value.items())
+        return any(sensitive_value_present(item) for item in value.values())
+    if isinstance(value, list):
+        return any(sensitive_value_present(item) for item in value)
+    return not safe_placeholder(value)
+
+
+def secret_in_config(value: object, key: str = "") -> bool:
+    if key and sensitive_key(key) and sensitive_value_present(value):
+        return True
+    if isinstance(value, dict):
+        return any(secret_in_config(item, str(name)) for name, item in value.items())
     if isinstance(value, list):
         return any(secret_in_config(item, key) for item in value)
-    if key not in {"key", "secret", "api_key", "api_secret"}:
-        return False
-    if value is None or value == "":
-        return False
-    return str(value).strip().upper() not in {"REDACTED", "***", "<REDACTED>"}
+    return False
+
+
+def text_has_literal_secret(text: str) -> bool:
+    for match in KEY_VALUE_LITERAL.finditer(text):
+        key = normalize_key(match.group("key").strip("\"'"))
+        # A generic JSON "key" commonly names result rows; only structured
+        # config paths treat that short field as a credential.
+        if key != "key" and sensitive_key(key) and not safe_placeholder(match.group("value")):
+            return True
+    for match in HEADER_LITERAL.finditer(text):
+        if not safe_placeholder(match.group("value")):
+            return True
+    return any("${" not in match.group(0) for match in CREDENTIAL_URL.finditer(text))
+
+
+def bytes_have_known_secret(data: bytes) -> bool:
+    return any(pattern.search(data) for pattern in KNOWN_SECRET_MARKERS)
+
+
+def scan_text(data: bytes) -> None:
+    if bytes_have_known_secret(data):
+        raise SecretError("input contains credential-like data")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise SecretError("text input cannot be decoded safely") from exc
+    if text_has_literal_secret(text):
+        raise SecretError("input contains credential-like data")
+
+
+def scan_csv(data: bytes) -> None:
+    scan_text(data)
+    try:
+        reader = csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+        for row in reader:
+            for key, value in row.items():
+                if key and sensitive_key(key) and not safe_placeholder(value):
+                    raise SecretError("input contains credential-like data")
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise SecretError("text input cannot be decoded safely") from exc
+
+
+def scan_archive(data: bytes, *, strict_binary: bool) -> None:
+    members = safe_members(data)
+    for name, member_data in members.items():
+        if bytes_have_known_secret(member_data):
+            raise SecretError("input contains credential-like data")
+        suffix = PurePosixPath(name).suffix.lower()
+        if suffix in TEXT_MEMBER_SUFFIXES:
+            scan_text(member_data)
+        elif strict_binary and suffix not in KNOWN_BINARY_SUFFIXES:
+            raise SecretError("private archive contains an unsupported binary member")
 
 
 def number(value: object, field: str) -> float:
@@ -144,9 +299,9 @@ def list_of_strings(value: object, field: str) -> list[str]:
     return value
 
 
-def parse_artifact(path: Path) -> dict:
+def parse_artifact(data: bytes) -> dict:
     """Parse one native Freqtrade backtest export and its reproducibility identity."""
-    members = safe_members(path)
+    members = safe_members(data)
     _, report_data = only_member(
         members,
         lambda name: name.endswith(".json") and not name.endswith("_config.json"),
@@ -157,7 +312,7 @@ def parse_artifact(path: Path) -> dict:
     report = read_json(report_data, "report")
     config = read_json(config_data, "config")
     if secret_in_config(config):
-        raise SecretError("exported config contains an unredacted exchange key or secret")
+        raise SecretError("exported config contains credential-like data")
     strategies = report.get("strategy")
     if not isinstance(strategies, dict) or len(strategies) != 1:
         raise ValueError("report must contain exactly one strategy")
@@ -225,7 +380,7 @@ def parse_artifact(path: Path) -> dict:
     if not 0 <= require_nonnegative["max_drawdown_account"] <= 1:
         raise ValueError("max_drawdown_account must be between 0 and 1")
     return {
-        "source": {"sha256": sha256_file(path), "size_bytes": path.stat().st_size},
+        "source": {"sha256": sha256_bytes(data), "size_bytes": len(data)},
         "identity": identity,
         "pairlist_methods": methods,
         "metrics": {
@@ -238,13 +393,13 @@ def parse_artifact(path: Path) -> dict:
     }
 
 
-def parse_lookahead(path: Path) -> dict:
+def parse_lookahead(data: bytes) -> dict:
     try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        with io.StringIO(data.decode("utf-8-sig"), newline="") as handle:
             reader = csv.DictReader(handle)
             rows = list(reader)
             fieldnames = reader.fieldnames
-    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+    except (UnicodeDecodeError, csv.Error) as exc:
         raise ValueError("malformed lookahead CSV") from exc
     required = {"strategy", "has_bias", "total_signals", "biased_entry_signals", "biased_exit_signals"}
     if (
@@ -277,8 +432,8 @@ def parse_lookahead(path: Path) -> dict:
             raise ValueError("malformed lookahead CSV")
         has_bias = has_bias or value == "true"
     return {
-        "sha256": sha256_file(path),
-        "size_bytes": path.stat().st_size,
+        "sha256": sha256_bytes(data),
+        "size_bytes": len(data),
         "has_bias": has_bias,
         "total_signals": checked,
         "biased_entry_signals": entry,
@@ -353,6 +508,8 @@ def markdown_report(verdict: str, checks: list[dict], base: dict | None, stress:
     lines = [
         "# GMAQ Evidence Pack",
         "",
+        "**PRIVATE ARTIFACT: DO NOT UPLOAD OR SHARE THIS DIRECTORY.**",
+        "",
         f"**Verdict: `{verdict}`**",
         "",
         "This pack audits supplied native Freqtrade artifacts offline. It does not establish Alpha, profitability, live readiness, or safety to trade.",
@@ -373,8 +530,26 @@ def markdown_report(verdict: str, checks: list[dict], base: dict | None, stress:
     return "\n".join(lines) + "\n"
 
 
-def build_pack(base_path: Path, output: Path, stress_path: Path | None = None, lookahead_path: Path | None = None, base_fee: float | None = None, stress_fee: float | None = None) -> str:
-    """Build a deterministic self-contained pack. Returns its one allowed verdict."""
+def public_summary(verdict: str, checks: list[dict], *, stress: bool, lookahead: bool) -> dict:
+    return {
+        "checks": [{"name": item["name"], "status": item["status"]} for item in checks],
+        "claims": {"alpha": False, "live_ready": False, "profitability": False, "safe_to_trade": False},
+        "evidence": {"base": True, "lookahead": lookahead, "stress": stress},
+        "format": PUBLIC_FORMAT,
+        "verdict": verdict,
+    }
+
+
+def build_pack(
+    base_path: Path,
+    output: Path,
+    stress_path: Path | None = None,
+    lookahead_path: Path | None = None,
+    base_fee: float | None = None,
+    stress_fee: float | None = None,
+    include_private_artifacts: bool = False,
+) -> str:
+    """Build a public summary, plus a full private pack only when explicitly requested."""
     paths = {"base.zip": base_path}
     if stress_path:
         paths["stress.zip"] = stress_path
@@ -382,45 +557,67 @@ def build_pack(base_path: Path, output: Path, stress_path: Path | None = None, l
         paths["lookahead.csv"] = lookahead_path
     if output.exists():
         raise ValueError("output directory must be new")
-    for path in paths.values():
-        if not path.is_file():
-            raise ValueError(f"input is not a file: {path}")
+    snapshots = {name: read_snapshot(path) for name, path in paths.items()}
 
-    # Parse first: a secret must never be copied into a supposedly safe pack.
+    # All parsing and scanning uses the same byte snapshots. No output exists yet.
     errors: list[str] = []
     base = stress = lookahead = None
     try:
-        base = parse_artifact(base_path)
+        base = parse_artifact(snapshots["base.zip"])
     except SecretError:
         raise
     except ValueError as exc:
         errors.append(f"base: {exc}")
     if stress_path:
         try:
-            stress = parse_artifact(stress_path)
+            stress = parse_artifact(snapshots["stress.zip"])
         except SecretError:
             raise
         except ValueError as exc:
             errors.append(f"stress: {exc}")
     if lookahead_path:
         try:
-            lookahead = parse_lookahead(lookahead_path)
+            lookahead = parse_lookahead(snapshots["lookahead.csv"])
         except ValueError as exc:
             errors.append(f"lookahead: {exc}")
+
+    for name in ("base.zip", "stress.zip"):
+        if name not in snapshots:
+            continue
+        try:
+            scan_archive(snapshots[name], strict_binary=include_private_artifacts)
+        except SecretError:
+            raise
+        except ValueError:
+            if include_private_artifacts:
+                raise ValueError("private artifacts require a fully inspectable archive") from None
+    if "lookahead.csv" in snapshots:
+        scan_csv(snapshots["lookahead.csv"])
+    if include_private_artifacts and errors:
+        raise ValueError("private artifacts require all supplied inputs to parse safely")
+
     verdict, checks = evaluate(base, stress, lookahead, errors, base_fee, stress_fee)
 
     output.mkdir()
+    write_json(
+        output / "public-summary.json",
+        public_summary(verdict, checks, stress=stress_path is not None, lookahead=lookahead_path is not None),
+    )
+    if not include_private_artifacts:
+        return verdict
+
     inputs = output / "inputs"
     inputs.mkdir()
-    for name, path in paths.items():
-        shutil.copyfile(path, inputs / name)
+    for name, data in snapshots.items():
+        (inputs / name).write_bytes(data)
     manifest = {
         "base": base,
         "claims": {"alpha": False, "live_ready": False, "profitability": False, "safe_to_trade": False},
         "declared_fees": {"base": base_fee, "stress": stress_fee, "verification": "DECLARED_NOT_EMBEDDED_IN_FREQTRADE_EXPORT"},
         "format": "gmaq-evidence-pack-v0.1",
-        "inputs": {name: {"sha256": sha256_file(path), "size_bytes": path.stat().st_size} for name, path in sorted(paths.items())},
+        "inputs": {name: {"sha256": sha256_bytes(data), "size_bytes": len(data)} for name, data in sorted(snapshots.items())},
         "lookahead": lookahead,
+        "privacy": "PRIVATE_DO_NOT_UPLOAD",
         "stress": stress,
     }
     verdict_data = {
@@ -432,26 +629,39 @@ def build_pack(base_path: Path, output: Path, stress_path: Path | None = None, l
     write_json(output / "verdict.json", verdict_data)
     (output / "report.md").write_text(markdown_report(verdict, checks, base, stress, lookahead), encoding="utf-8")
     files = sorted(path for path in output.rglob("*") if path.is_file() and path.name != "checksums.sha256")
-    checksum_lines = [f"{sha256_file(path)}  {path.relative_to(output).as_posix()}" for path in files]
+    checksum_lines = [f"{sha256_bytes(path.read_bytes())}  {path.relative_to(output).as_posix()}" for path in files]
     (output / "checksums.sha256").write_text("\n".join(checksum_lines) + "\n", encoding="ascii")
     return verdict
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Create an offline GMAQ evidence pack from native Freqtrade exports.")
+    parser = argparse.ArgumentParser(description="Create an offline public evidence summary from native Freqtrade exports.")
     parser.add_argument("--base", required=True, type=Path, help="base-fee Freqtrade backtest ZIP")
     parser.add_argument("--stress", type=Path, help="higher-fee Freqtrade backtest ZIP")
     parser.add_argument("--lookahead", type=Path, help="Freqtrade lookahead-analysis CSV")
     parser.add_argument("--base-fee", type=float, help="declared base fee; required with --stress")
     parser.add_argument("--stress-fee", type=float, help="declared stress fee; required with --stress")
-    parser.add_argument("--output", required=True, type=Path, help="new evidence-pack directory")
+    parser.add_argument("--output", required=True, type=Path, help="new public-summary directory")
+    parser.add_argument(
+        "--include-private-artifacts",
+        action="store_true",
+        help="also write raw inputs and detailed private evidence; never upload or share this output directory",
+    )
     args = parser.parse_args(argv)
     if args.stress and (args.base_fee is None or args.stress_fee is None):
         parser.error("--base-fee and --stress-fee are required with --stress")
     if not args.stress and (args.base_fee is not None or args.stress_fee is not None):
         parser.error("fee flags are only valid with --stress")
     try:
-        verdict = build_pack(args.base, args.output, args.stress, args.lookahead, args.base_fee, args.stress_fee)
+        verdict = build_pack(
+            args.base,
+            args.output,
+            args.stress,
+            args.lookahead,
+            args.base_fee,
+            args.stress_fee,
+            args.include_private_artifacts,
+        )
     except SecretError as exc:
         print(f"refusing to create pack: {exc}", file=sys.stderr)
         return 2
