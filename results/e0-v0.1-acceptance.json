@@ -1,0 +1,35 @@
+{
+  "claims": {
+    "alpha": false,
+    "live_ready": false,
+    "profitability": false,
+    "safe_to_trade": false
+  },
+  "contract": {
+    "freeze_commit": "cc31cedf5a648f04bef6ed9d4f688565f00ee144",
+    "path": "PRODUCT_CONTRACT.md",
+    "sha256": "3aa0b1b708dfc08e14120afd607e0871bb042787cf8d69c3a343b6aab6b15585"
+  },
+  "core_output_sha256": {
+    "checksums.sha256": "5b436d644162852e5c52c0546046f0e1bf808b0f1a8dc9955a83aece5462dfcb",
+    "manifest.json": "afb33b4784ffb4375abb8087811661ba28d21ff65b7674045731657cdc312559",
+    "report.md": "9fefc67fc4b1f330c74af8ae327c8f9b870a478c7e1a01a9d6f87b444244abac",
+    "verdict.json": "b1957c9437aac56bf2634517ebf20260a470818e2fe8ff7980eef9cbc2889705"
+  },
+  "inputs": {
+    "base_zip_sha256": "9bd2b4a31030a4840609593f84c5f20de865e649393653ac2f961b756e10152c",
+    "lookahead_csv_sha256": "8a1180e4e6358b9ec5fcd7e7ec3c3a8f692ee6525c3a6a1a2a1dd05978b462b6",
+    "stress_zip_sha256": "2dbab9d94e247163a739b5f82eaace2f1bcef43699dbf5cfea7e461f875f6fb4"
+  },
+  "implementation_commit": "a4cce54b9584053987cca772f636af4eda9fc575",
+  "product": "GMAQ_EVIDENCE_PACK_V0_1",
+  "real_freqtrade_artifacts": true,
+  "status": "ACCEPTANCE_PASS",
+  "strategy": "E0V1E_53_Sharpe",
+  "tests": {
+    "passed": 7,
+    "python": "3.12"
+  },
+  "twice_byte_identical": true,
+  "verdict": "PASS_FOR_REVIEW"
+}
