@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/evidence-pack-hero.svg" alt="GMAQ Evidence Pack, offline Freqtrade backtest evidence audit" width="100%">
+  <img src="docs/assets/evidence-pack-hero.svg" alt="GMAQ Evidence Pack, offline Freqtrade evidence preflight" width="100%">
 </p>
 
 <p align="center">
@@ -10,13 +10,24 @@
   <img src="https://img.shields.io/badge/v0.1-TECHNICAL%20ACCEPTANCE-16A34A" alt="v0.1 technical acceptance">
 </p>
 
-<p align="center"><strong>Turn native Freqtrade exports into a bounded local audit and a safely shareable summary.</strong></p>
+<p align="center"><strong>Preflight native Freqtrade evidence before you review strategy code.</strong></p>
 
-GMAQ Evidence Pack audits existing Freqtrade base/stress backtest ZIPs and lookahead CSVs. It applies frozen screening gates and produces a deterministic, fixed-whitelist public summary by default. Raw inputs and detailed identities are written only with an explicit private-artifacts option. The tool runs offline with the Python standard library.
+GMAQ Evidence Pack checks existing Freqtrade base/stress backtest ZIPs and lookahead CSVs before manual strategy review. It verifies artifact identity, applies frozen preflight checks, and produces a deterministic, fixed-whitelist public summary. The tool runs offline with the Python standard library. It does not grade strategies, choose pairlists, or replace code review.
 
 Freqtrade warns that dynamic pairlists can break historical reproducibility and that backtests can diverge from dry/live behavior because of lookahead, recursive indicators, fills, and other assumptions. See the official [backtesting](https://docs.freqtrade.io/en/stable/backtesting/), [lookahead analysis](https://docs.freqtrade.io/en/stable/lookahead-analysis/), and [recursive analysis](https://docs.freqtrade.io/en/stable/recursive-analysis/) documentation.
 
+## Scope
+
+Run the preflight before you spend time reading strategy code. It filters incomplete, inconsistent, or unsafe evidence. A reviewer still has to understand the strategy, select an appropriate pairlist, explain failures, and judge robustness.
+
+| The preflight checks | The reviewer decides |
+| --- | --- |
+| Artifact safety, run identity, static pairlist evidence, lookahead evidence, and frozen screening checks | Whether the pairlist fits the strategy and whether the strategy logic makes sense |
+| Public/private output boundaries and recorded provenance gaps | Whether the result is robust, worth improving, or suitable for further observation |
+
 ## Quick start
+
+Create the base, stress, and lookahead artifacts with native Freqtrade first. This tool reads those artifacts; it does not run the backtests.
 
 ```sh
 git clone https://github.com/jojo232386/gmaq-evidence-pack.git
@@ -39,9 +50,9 @@ The default output contains only `public-summary.json`. It has no strategy name,
 
 | Verdict | Meaning |
 | --- | --- |
-| `PASS_FOR_REVIEW` | Complete screening evidence passed; a person must still review and confirm it |
+| `PASS_FOR_REVIEW` | Supplied evidence passed the frozen preflight checks; begin manual review |
 | `REVIEW_REQUIRED` | The base export parsed, but stress or lookahead evidence is missing |
-| `BLOCKED` | Artifact safety, identity, bias, reproducibility, or a frozen screening gate failed |
+| `BLOCKED` | Artifact safety, identity, bias, reproducibility, or a frozen preflight check failed |
 
 No verdict claims Alpha, profitability, live readiness, or safety to trade.
 
@@ -82,7 +93,7 @@ private-evidence-pack/
 
 The private manifest binds input SHA256 values, strategy source, timeframe, timerange, pairlist, trading mode, portfolio limits, declared fees, base/stress metrics, and lookahead identity. Declared fee values carry `DECLARED_NOT_EMBEDDED_IN_FREQTRADE_EXPORT`, because a native ZIP does not prove the original CLI fee arguments.
 
-The tool never applies a fee or adjusts profit after a backtest. Base and stress must be two independently generated Freqtrade exports, and the stress export must already reflect the higher fee during its native run. Because the ZIP does not preserve the CLI `--fee` argument, `--base-fee` and `--stress-fee` remain unverified declarations; they cannot prove that Freqtrade actually applied those values. This provenance gap is tracked in [issue #2](https://github.com/jojo232386/gmaq-evidence-pack/issues/2).
+The tool never applies a fee or adjusts profit after a backtest. Base and stress must come from two separate Freqtrade runs, and the stress export must already reflect the higher fee during its native run. Because the ZIP does not preserve the CLI `--fee` argument, `--base-fee` and `--stress-fee` remain unverified declarations; they cannot prove Freqtrade applied those values during either run. This provenance gap is tracked in [issue #2](https://github.com/jojo232386/gmaq-evidence-pack/issues/2).
 
 **Never upload or share the private directory.** Its safety scan is defense in depth, not proof that every secret or proprietary detail was removed.
 
@@ -92,7 +103,7 @@ Use the structured [Evidence audit request](https://github.com/jojo232386/gmaq-e
 
 The first public-validation window and its stop conditions are recorded in [MARKET_VALIDATION.md](MARKET_VALIDATION.md). v0.2 will not be designed until external evidence shows a repeated problem.
 
-## Frozen checks
+## Frozen preflight checks
 
 - bounded ZIP structure, path safety, CRC, duplicate names, normalized structured credential fields, and obvious literal-secret patterns;
 - static pairlist plus exact base/stress strategy, source, timeframe, timerange, and portfolio identity;
