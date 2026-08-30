@@ -1,6 +1,6 @@
-name: Evidence audit request
-description: Ask for help interpreting a locally generated GMAQ Evidence Pack without uploading private trading artifacts.
-title: "[Audit] "
+name: Evidence preflight request
+description: Ask for help interpreting a local preflight result without uploading private trading artifacts.
+title: "[Preflight] "
 body:
   - type: markdown
     attributes:
@@ -69,7 +69,7 @@ body:
     id: question
     attributes:
       label: What should we help you understand?
-      description: Describe the reproducibility or evidence problem, not the private strategy logic.
+      description: Describe the reproducibility or evidence problem. Strategy logic remains part of manual review.
     validations:
       required: true
 

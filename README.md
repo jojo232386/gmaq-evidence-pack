@@ -97,9 +97,9 @@ The tool never applies a fee or adjusts profit after a backtest. Base and stress
 
 **Never upload or share the private directory.** Its safety scan is defense in depth, not proof that every secret or proprietary detail was removed.
 
-## Request a review
+## Request a preflight review
 
-Use the structured [Evidence audit request](https://github.com/jojo232386/gmaq-evidence-pack/issues/new?template=audit-request.yml). It accepts `public-summary.json` and a bounded question. Never attach private-artifact output, raw ZIPs, strategy source, configs, databases, credentials, account data, hashes, or orders.
+Use the structured [Evidence preflight request](https://github.com/jojo232386/gmaq-evidence-pack/issues/new?template=audit-request.yml). It accepts `public-summary.json` and a bounded question. Never attach private-artifact output, raw ZIPs, strategy source, configs, databases, credentials, account data, hashes, or orders.
 
 The first public-validation window and its stop conditions are recorded in [MARKET_VALIDATION.md](MARKET_VALIDATION.md). v0.2 will not be designed until external evidence shows a repeated problem.
 

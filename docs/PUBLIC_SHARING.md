@@ -38,6 +38,6 @@ Do not upload private-artifact output, `inputs/`, native ZIPs, strategy files, c
 }
 ```
 
-This is enough to identify the failed stage without publishing its raw error, strategy, market, metric, path, or account. Use the repository's [Evidence audit request](https://github.com/jojo232386/gmaq-evidence-pack/issues/new?template=audit-request.yml) form.
+This is enough to identify the failed stage without publishing its raw error, strategy, market, metric, path, or account. Use the repository's [Evidence preflight request](https://github.com/jojo232386/gmaq-evidence-pack/issues/new?template=audit-request.yml) form.
 
 Secret scanning in private mode is defense in depth, not proof that a private pack is safe to disclose. The only file approved for direct public sharing is the default mode's `public-summary.json`.
