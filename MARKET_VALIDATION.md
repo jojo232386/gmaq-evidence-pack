@@ -14,6 +14,8 @@ This release tests whether Freqtrade users need a small, offline evidence prefli
 
 Only public GitHub issues whose authors consent to counting are attributable. There is no product telemetry, so zero means no attributable evidence, not proof of zero unseen use.
 
+The bundled `synthetic_demo` is an onboarding check only. Its runs and summaries never count as attributable external preflight cases.
+
 ## Guardrails
 
 - zero credentials, funds, account data, private code, raw ZIPs, databases, or order histories collected;

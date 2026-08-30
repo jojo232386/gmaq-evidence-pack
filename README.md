@@ -25,7 +25,22 @@ Run the preflight before you spend time reading strategy code. It filters incomp
 | Artifact safety, run identity, static pairlist evidence, lookahead evidence, and frozen screening checks | Whether the pairlist fits the strategy and whether the strategy logic makes sense |
 | Public/private output boundaries and recorded provenance gaps | Whether the result is robust, worth improving, or suitable for further observation |
 
-## Quick start
+## 60-second synthetic demo
+
+No Freqtrade artifacts ready yet? Run the complete public-output path with generated synthetic inputs:
+
+```sh
+git clone https://github.com/jojo232386/gmaq-evidence-pack.git
+cd gmaq-evidence-pack
+scripts/gmaq-evidence-pack-demo
+cat gmaq-demo/public-summary.json
+```
+
+The demo runs offline, discards its generated inputs, and leaves one deterministic `public-summary.json`. Its checks include `synthetic_demo: PASS`, keeping the generated summary visibly separate from a real strategy result. A demo `PASS_FOR_REVIEW` means only that fixed synthetic evidence traversed the preflight; it is not an external validation case and says nothing about Alpha, profitability, live readiness, or safety to trade.
+
+The command never overwrites an existing directory. For another run, use `scripts/gmaq-evidence-pack-demo --output gmaq-demo-2`.
+
+## Run on your own native artifacts
 
 Create the base, stress, and lookahead artifacts with native Freqtrade first. This tool reads those artifacts; it does not run the backtests.
 
@@ -131,7 +146,7 @@ The committed [acceptance record](results/e0-v0.1-acceptance.json) binds the pri
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile gmaq_evidence_pack.py scripts/gmaq-evidence-pack
+python3 -m py_compile gmaq_evidence_pack.py scripts/gmaq-evidence-pack scripts/gmaq-evidence-pack-demo
 ```
 
 The frozen product boundary and acceptance rules live in [PRODUCT_CONTRACT.md](PRODUCT_CONTRACT.md). The software is available under the [MIT License](LICENSE).

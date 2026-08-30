@@ -7,6 +7,8 @@ body:
       value: |
         Run GMAQ Evidence Pack locally and share only its generated `public-summary.json` plus the fields requested below.
 
+        The bundled `synthetic_demo` output is for onboarding only and is not counted as an external preflight case.
+
         **Do not use the private-artifacts option for a public issue. Do not upload a Freqtrade ZIP, strategy source, config, database, API key, secret, account balance, order history, or wallet information.** Maintainers will never ask for credentials or funds.
 
   - type: input

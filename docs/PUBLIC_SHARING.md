@@ -2,6 +2,8 @@
 
 The default output contains only a fixed-whitelist `public-summary.json`. A private archival pack is created only with `--include-private-artifacts`; it can contain copied Freqtrade exports, configuration, strategy source, identity, pairlist, metrics, and hashes.
 
+The bundled output containing the `synthetic_demo` check is an onboarding example. Do not submit or count it as a real external preflight case.
+
 ## Safe default
 
 For a public review request, share only:

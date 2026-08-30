@@ -3,6 +3,8 @@ import csv
 import importlib.util
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -140,6 +142,42 @@ class EvidencePackTests(unittest.TestCase):
         serialized = (first / "public-summary.json").read_text()
         for private_value in ("ExampleStrategy", "BTC/USDT", "0.001", "sha256", "timerange", "detail"):
             self.assertNotIn(private_value, serialized)
+
+    def test_synthetic_demo_is_explicit_public_and_deterministic(self):
+        outputs = [self.root / "demo-first", self.root / "demo-second"]
+        serialized = []
+        for output in outputs:
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "gmaq-evidence-pack-demo"), "--output", str(output)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("SYNTHETIC DEMO ONLY", result.stdout)
+            self.assertIn("not a strategy result or external validation case", result.stdout)
+            self.assertEqual([path.name for path in output.iterdir()], ["public-summary.json"])
+            summary = self.public_summary(output)
+            self.assert_public_schema(
+                summary,
+                evidence_pack.PASS_FOR_REVIEW,
+                stress=True,
+                lookahead=True,
+            )
+            self.assertIn({"name": "synthetic_demo", "status": "PASS"}, summary["checks"])
+            serialized.append((output / "public-summary.json").read_bytes())
+            public_text = serialized[-1].decode()
+            for private_value in (
+                "SyntheticDemoStrategy",
+                "DEMO-A/QUOTE",
+                "0.001",
+                "0.12",
+                "1.2",
+                "timerange",
+                "detail",
+            ):
+                self.assertNotIn(private_value, public_text)
+        self.assertEqual(serialized[0], serialized[1])
 
     def test_private_artifacts_are_explicit_and_deterministic(self):
         first = self.root / "private-first"

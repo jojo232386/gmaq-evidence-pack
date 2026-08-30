@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Run a self-contained synthetic onboarding demo for GMAQ Evidence Pack."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import json
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from gmaq_evidence_pack import PASS_FOR_REVIEW, build_pack, write_json
+
+
+STRATEGY = "SyntheticDemoStrategy"
+PAIRS = ["DEMO-A/QUOTE", "DEMO-B/QUOTE"]
+
+
+def write_export(path: Path, *, total_return: float, profit_factor: float) -> None:
+    """Create the smallest native-shaped synthetic export accepted by the parser."""
+    summary = {
+        "strategy_name": STRATEGY,
+        "timeframe": "5m",
+        "timerange": "20240101-20250101",
+        "pairlist": PAIRS,
+        "trading_mode": "futures",
+        "margin_mode": "isolated",
+        "stake_currency": "QUOTE",
+        "max_open_trades": 2,
+        "total_trades": 120,
+        "profit_total": total_return,
+        "profit_factor": profit_factor,
+        "max_drawdown_account": 0.20,
+        "results_per_pair": [
+            {"key": PAIRS[0], "profit_total_abs": 60},
+            {"key": PAIRS[1], "profit_total_abs": 40},
+            {"key": "TOTAL", "profit_total_abs": 100},
+        ],
+    }
+    config = {
+        "strategy": STRATEGY,
+        "timeframe": "5m",
+        "pairlists": [{"method": "StaticPairList"}],
+        "trading_mode": "futures",
+        "margin_mode": "isolated",
+        "stake_currency": "QUOTE",
+        "max_open_trades": 2,
+        "exchange": {
+            "pair_whitelist": PAIRS,
+            "key": "REDACTED",
+            "secret": "REDACTED",
+        },
+    }
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("result.json", json.dumps({"strategy": {STRATEGY: summary}}, sort_keys=True))
+        archive.writestr("result_config.json", json.dumps(config, sort_keys=True))
+        archive.writestr(f"{STRATEGY}.py", f"class {STRATEGY}:\n    pass\n")
+
+
+def write_lookahead(path: Path) -> None:
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=[
+            "strategy",
+            "has_bias",
+            "total_signals",
+            "biased_entry_signals",
+            "biased_exit_signals",
+        ],
+    )
+    writer.writeheader()
+    writer.writerow(
+        {
+            "strategy": STRATEGY,
+            "has_bias": "False",
+            "total_signals": 20,
+            "biased_entry_signals": 0,
+            "biased_exit_signals": 0,
+        }
+    )
+    path.write_text(buffer.getvalue(), encoding="utf-8")
+
+
+def run_demo(output: Path) -> str:
+    if output.exists():
+        raise ValueError("output directory must be new")
+    with tempfile.TemporaryDirectory(prefix="gmaq-synthetic-demo-") as temporary:
+        inputs = Path(temporary)
+        base = inputs / "base.zip"
+        stress = inputs / "stress.zip"
+        lookahead = inputs / "lookahead.csv"
+        write_export(base, total_return=0.12, profit_factor=1.20)
+        write_export(stress, total_return=0.08, profit_factor=1.10)
+        write_lookahead(lookahead)
+        verdict = build_pack(base, output, stress, lookahead, 0.001, 0.002)
+
+    if verdict != PASS_FOR_REVIEW:
+        raise RuntimeError(f"synthetic demo unexpectedly returned {verdict}")
+    summary_path = output / "public-summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["checks"].insert(0, {"name": "synthetic_demo", "status": "PASS"})
+    write_json(summary_path, summary)
+    return verdict
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the GMAQ synthetic onboarding demo offline.")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("gmaq-demo"),
+        help="new demo output directory (default: gmaq-demo)",
+    )
+    args = parser.parse_args(argv)
+    try:
+        verdict = run_demo(args.output)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"demo error: {exc}", file=sys.stderr)
+        return 2
+
+    print("SYNTHETIC DEMO ONLY — not a strategy result or external validation case.")
+    print(verdict)
+    print(f"Created {args.output / 'public-summary.json'}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
