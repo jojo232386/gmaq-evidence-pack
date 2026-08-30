@@ -82,6 +82,8 @@ private-evidence-pack/
 
 The private manifest binds input SHA256 values, strategy source, timeframe, timerange, pairlist, trading mode, portfolio limits, declared fees, base/stress metrics, and lookahead identity. Declared fee values carry `DECLARED_NOT_EMBEDDED_IN_FREQTRADE_EXPORT`, because a native ZIP does not prove the original CLI fee arguments.
 
+The tool never applies a fee or adjusts profit after a backtest. Base and stress must be two independently generated Freqtrade exports, and the stress export must already reflect the higher fee during its native run. Because the ZIP does not preserve the CLI `--fee` argument, `--base-fee` and `--stress-fee` remain unverified declarations; they cannot prove that Freqtrade actually applied those values. This provenance gap is tracked in [issue #2](https://github.com/jojo232386/gmaq-evidence-pack/issues/2).
+
 **Never upload or share the private directory.** Its safety scan is defense in depth, not proof that every secret or proprietary detail was removed.
 
 ## Request a review
